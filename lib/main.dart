@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:glob/glob.dart';
 import 'package:glob/list_local_fs.dart';
 import 'package:path/path.dart' as p;
-import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() async {
@@ -22,12 +21,7 @@ void main() async {
     await windowManager.show();
     await windowManager.focus();
   });
-  runApp(MultiProvider(
-    providers: [
-      ChangeNotifierProvider(create: (_) => Counter()),
-    ],
-    child: const MyApp(),
-  ));
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -36,190 +30,132 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Jupyter Counter',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(),
+      home: const CounterViewer(),
     );
   }
 }
 
-class MyHomePage extends StatelessWidget {
-  const MyHomePage({super.key});
+class CounterViewer extends StatefulWidget {
+  const CounterViewer({
+    super.key,
+  });
+
+  @override
+  State<CounterViewer> createState() => _CounterViewerState();
+}
+
+class JupyterNotebookInfo {
+  final String fileName;
+  final String filePath;
+  final int lineCount;
+
+  JupyterNotebookInfo(this.fileName, this.filePath, this.lineCount);
+}
+
+class _CounterViewerState extends State<CounterViewer> {
+  int _sumLineCount = 0;
+  final List<JupyterNotebookInfo> _notebooks = [];
+
+  Future<void> readJupyterNotebook(String filePath) async {
+    // 检测是否已经读取过这个文件
+    for (final notebook in _notebooks) {
+      if (notebook.filePath == filePath) {
+        return;
+      }
+    }
+    final fileContent = await File(filePath).readAsString();
+    final fileJson = jsonDecode(fileContent);
+    final fileCells = fileJson['cells'] as List?;
+    if (fileCells == null) {
+      return;
+    }
+    int lineCount = 0;
+    for (var cell in fileCells) {
+      final cellType = cell["cell_type"] as String?;
+      final source = cell["source"] as List?;
+      if (cellType == "code" && source != null) {
+        lineCount += source.length;
+      }
+    }
+    final fileName = p.basename(filePath);
+    setState(() {
+      _notebooks.add(JupyterNotebookInfo(fileName, filePath, lineCount));
+      _sumLineCount += lineCount;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Jupyter代码统计'),
-        backgroundColor: Theme.of(context).primaryColor.withOpacity(0.15),
+      body: Center(
+        child: ListView(children: [
+          DataTable(columns: const [
+            DataColumn(
+                label: Expanded(
+                    child: Text("文件名",
+                        style: TextStyle(fontWeight: FontWeight.bold)))),
+            DataColumn(
+                label: Expanded(
+                    child: Text("路径",
+                        style: TextStyle(fontWeight: FontWeight.bold)))),
+            DataColumn(
+                label: Expanded(
+                    child: Text("行数",
+                        style: TextStyle(fontWeight: FontWeight.bold))))
+          ], rows: getNotebookRows)
+        ]),
       ),
-      body: const CountTable(),
-      floatingActionButton: const SelectFileActions(),
+      appBar: AppBar(
+          title: const Text("Jupyter代码统计"),
+          backgroundColor: Theme.of(context).primaryColor.withOpacity(0.15)),
+      floatingActionButton:
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+        Text(
+          "总计: $_sumLineCount 行",
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(width: 24),
+        FloatingActionButton(
+            onPressed: () async {
+              FilePickerResult? result = await FilePicker.platform.pickFiles(
+                  type: FileType.custom, allowedExtensions: ['ipynb']);
+              if (result != null) {
+                try {
+                  readJupyterNotebook(result.files.single.path!);
+                } on FormatException {
+                  return;
+                }
+              }
+            },
+            child: const Icon(Icons.file_open)),
+        const SizedBox(width: 24),
+        FloatingActionButton(
+            onPressed: () async {
+              String? selectedDirectory =
+                  await FilePicker.platform.getDirectoryPath();
+              if (selectedDirectory != null) {
+                final jupyterNotebooks = Glob("*.ipynb");
+                await for (var entity
+                    in jupyterNotebooks.list(root: selectedDirectory)) {
+                  readJupyterNotebook(entity.path);
+                }
+              }
+            },
+            child: const Icon(Icons.folder_open))
+      ]),
     );
   }
-}
 
-class SelectFileActions extends StatelessWidget {
-  const SelectFileActions({
-    super.key,
-  });
-
-  void countNotebook(BuildContext context, File file) {
-    var data = file.readAsStringSync();
-    var data1 = jsonDecode(data);
-    int sumLines = 0;
-    if (data1 is Map) {
-      var cells = data1["cells"];
-      if (cells is List) {
-        for (var cell in cells) {
-          if (cell["cell_type"] == "code" && cell["source"] is List) {
-            sumLines += (cell["source"] as List).length;
-          }
-        }
-      }
-    }
-    Provider.of<Counter>(context, listen: false)
-        .addNotebook(p.basename(file.path), file.path, sumLines);
-  }
-
-  Future<void> handleFileSelected(BuildContext context) async {
-    FilePickerResult? result = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['ipynb']);
-
-    if (result != null) {
-      File file = File(result.files.single.path!);
-      if (context.mounted) {
-        countNotebook(context, file);
-      }
-    }
-  }
-
-  Future<void> handleDirectorySelected(BuildContext context) async {
-    String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
-
-    if (selectedDirectory != null) {
-      final files = Glob(p.join(selectedDirectory, "*.ipynb"));
-      if (context.mounted) {
-        for (var entry in files.listSync()) {
-          countNotebook(context, File(entry.path));
-        }
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-      FloatingActionButton(
-          child: const Icon(Icons.file_open),
-          onPressed: () => handleFileSelected(context)),
-      const SizedBox(width: 16),
-      FloatingActionButton(
-          child: const Icon(Icons.folder_open),
-          onPressed: () => handleDirectorySelected(context))
-    ]);
-  }
-}
-
-class CountTable extends StatelessWidget {
-  const CountTable({
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    var notebooks = context.watch<Counter>().notebooks;
-    var sumLines = context.watch<Counter>().sumLines;
-    return Center(
-        child: ListView(
-      children: [
-        DataTable(
-          columns: const [
-            DataColumn(
-                label: Expanded(
-              child: Text(
-                '',
-              ),
-            )),
-            DataColumn(
-                label: Expanded(
-              child: Text(
-                '名称',
-              ),
-            )),
-            DataColumn(
-                label: Expanded(
-              child: Text(
-                '路径',
-              ),
-            )),
-            DataColumn(
-                label: Expanded(
-              child: Text(
-                '行数',
-              ),
-            ))
-          ],
-          rows: staticsRows(notebooks, sumLines),
-        ),
-      ],
-    ));
-  }
-
-  DataRow notebookCell(String name, String path, int lines) {
-    return DataRow(cells: [
-      const DataCell(Text('')),
-      DataCell(Text(name)),
-      DataCell(Text(path)),
-      DataCell(Text('$lines')),
-    ]);
-  }
-
-  DataRow sumCell(int sumLines) {
-    return DataRow(cells: [
-      const DataCell(Text('总计')),
-      const DataCell(Text('')),
-      const DataCell(Text('')),
-      DataCell(Text('$sumLines')),
-    ]);
-  }
-
-  List<DataRow> staticsRows(List<NotebookState> notebooks, int sumLines) {
-    List<DataRow> rows = [];
-    for (var notebook in notebooks) {
-      rows.add(notebookCell(notebook.name, notebook.path, notebook.lines));
-    }
-    rows.add(sumCell(sumLines));
-    return rows;
-  }
-}
-
-class NotebookState {
-  String name;
-  String path;
-  int lines;
-  NotebookState(this.name, this.path, this.lines);
-}
-
-class Counter with ChangeNotifier {
-  final List<NotebookState> _notebooks = [];
-
-  List<NotebookState> get notebooks => _notebooks;
-  int get sumLines => _sumLines();
-
-  void addNotebook(String name, String path, int lines) {
-    _notebooks.add(NotebookState(name, path, lines));
-    notifyListeners();
-  }
-
-  int _sumLines() {
-    int sum = 0;
-    for (var element in notebooks) {
-      sum += element.lines;
-    }
-    return sum;
-  }
+  List<DataRow> get getNotebookRows => _notebooks
+      .map((e) => DataRow(cells: [
+            DataCell(Text(e.fileName)),
+            DataCell(Text(e.filePath)),
+            DataCell(Text(e.lineCount.toString())),
+          ]))
+      .toList();
 }
