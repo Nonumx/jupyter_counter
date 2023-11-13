@@ -115,38 +115,47 @@ class _CounterViewerState extends State<CounterViewer> {
           backgroundColor: Theme.of(context).primaryColor.withOpacity(0.15)),
       floatingActionButton:
           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-        Text(
-          "总计: $_sumLineCount 行",
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+          ),
+          child: Text(
+            "总计: $_sumLineCount 行",
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         const SizedBox(width: 24),
         FloatingActionButton(
-            onPressed: () async {
-              FilePickerResult? result = await FilePicker.platform.pickFiles(
-                  type: FileType.custom, allowedExtensions: ['ipynb']);
-              if (result != null) {
-                try {
-                  readJupyterNotebook(result.files.single.path!);
-                } on FormatException {
-                  return;
-                }
+          onPressed: () async {
+            FilePickerResult? result = await FilePicker.platform
+                .pickFiles(type: FileType.custom, allowedExtensions: ['ipynb']);
+            if (result != null) {
+              try {
+                readJupyterNotebook(result.files.single.path!);
+              } on FormatException {
+                return;
               }
-            },
-            child: const Icon(Icons.file_open)),
+            }
+          },
+          child: const Icon(Icons.file_open),
+        ),
         const SizedBox(width: 24),
         FloatingActionButton(
-            onPressed: () async {
-              String? selectedDirectory =
-                  await FilePicker.platform.getDirectoryPath();
-              if (selectedDirectory != null) {
-                final jupyterNotebooks = Glob("*.ipynb");
-                await for (var entity
-                    in jupyterNotebooks.list(root: selectedDirectory)) {
-                  readJupyterNotebook(entity.path);
-                }
+          onPressed: () async {
+            String? selectedDirectory =
+                await FilePicker.platform.getDirectoryPath();
+            if (selectedDirectory != null) {
+              final jupyterNotebooks = Glob("*.ipynb");
+              await for (var entity
+                  in jupyterNotebooks.list(root: selectedDirectory)) {
+                readJupyterNotebook(entity.path);
               }
-            },
-            child: const Icon(Icons.folder_open))
+            }
+          },
+          child: const Icon(Icons.folder_open),
+        )
       ]),
     );
   }
